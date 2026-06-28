@@ -1,0 +1,146 @@
+{
+  "name": "Workflow 1 - Notificação de Pedido Aprovado",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-approved",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Pedido Aprovado",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "order-approved"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-approved",
+              "leftValue": "={{ $json.body.new_status }}",
+              "rightValue": "approved",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-approved",
+      "name": "Filtrar apenas 'approved'",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body;\nconst value = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(body.total_value);\nreturn {\n  message: `✅ Pedido #${body.order_id} aprovado — ${value} | Afiliado #${body.affiliate_id}`,\n  order_id: body.order_id,\n  affiliate_id: body.affiliate_id,\n  total_value: body.total_value,\n  approved_at: body.occurred_at\n};"
+      },
+      "id": "format-message",
+      "name": "Formatar Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://webhook.site/REPLACE_WITH_YOUR_WEBHOOK_SITE_ID",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "text", "value": "={{ $json.message }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-notification",
+      "name": "Enviar Notificação (webhook.site / Slack / Discord)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://webhook.site/REPLACE_WITH_YOUR_SHEETS_WEBHOOK_ID",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "order_id",    "value": "={{ $json.order_id }}" },
+            { "name": "affiliate_id","value": "={{ $json.affiliate_id }}" },
+            { "name": "total_value", "value": "={{ $json.total_value }}" },
+            { "name": "approved_at", "value": "={{ $json.approved_at }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-sheets",
+      "name": "Registrar no Google Sheets (via webhook.site mock)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 340]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"ok\" }",
+        "options": {}
+      },
+      "id": "response-ok",
+      "name": "Resposta OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"skipped\", \"reason\": \"not approved\" }",
+        "options": {}
+      },
+      "id": "response-skip",
+      "name": "Resposta Skip",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 420]
+    }
+  ],
+  "connections": {
+    "Webhook - Pedido Aprovado": {
+      "main": [[{ "node": "Filtrar apenas 'approved'", "type": "main", "index": 0 }]]
+    },
+    "Filtrar apenas 'approved'": {
+      "main": [
+        [{ "node": "Formatar Mensagem", "type": "main", "index": 0 }],
+        [{ "node": "Resposta Skip", "type": "main", "index": 0 }]
+      ]
+    },
+    "Formatar Mensagem": {
+      "main": [
+        [
+          { "node": "Enviar Notificação (webhook.site / Slack / Discord)", "type": "main", "index": 0 },
+          { "node": "Registrar no Google Sheets (via webhook.site mock)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Enviar Notificação (webhook.site / Slack / Discord)": {
+      "main": [[{ "node": "Resposta OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1",
+  "meta": { "templateCredsSetupCompleted": true }
+}

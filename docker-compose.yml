@@ -1,0 +1,128 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
+      MYSQL_DATABASE: ${DB_DATABASE:-order_hub}
+      MYSQL_USER: ${DB_USERNAME:-order_hub}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-order_hub_secret}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [app]
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [app]
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    command: php artisan serve --host=0.0.0.0 --port=8000
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: order_hub
+      DB_USERNAME: order_hub
+      DB_PASSWORD: order_hub_secret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_CLIENT: predis
+      CACHE_STORE: redis
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      N8N_WEBHOOK_URL: http://n8n:5678/webhook/order-status
+    depends_on:
+      mysql:   { condition: service_healthy }
+      redis:   { condition: service_healthy }
+    volumes:
+      - ./backend:/var/www/backend
+    networks: [app]
+    user: "1000:1000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    entrypoint: ["/worker-entrypoint.sh"]
+    command: php artisan queue:work --tries=3 --backoff=30 --sleep=3
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: order_hub
+      DB_USERNAME: order_hub
+      DB_PASSWORD: order_hub_secret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_CLIENT: predis
+      CACHE_STORE: redis
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      N8N_WEBHOOK_URL: http://n8n:5678/webhook/order-status
+    depends_on:
+      mysql:   { condition: service_healthy }
+      redis:   { condition: service_healthy }
+    volumes:
+      - ./backend:/var/www/backend
+    restart: unless-stopped
+    networks: [app]
+    user: "1000:1000"
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run build && cp -r dist/* /var/www/frontend/"
+    volumes:
+      - ./frontend:/app
+      - frontend_dist:/var/www/frontend
+    networks: [app]
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend_dist:/var/www/frontend:ro
+    depends_on:
+      backend:  { condition: service_started }
+      frontend: { condition: service_completed_successfully }
+    networks: [app]
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-orderhub_n8n_secret}
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      WEBHOOK_URL: http://localhost:5678
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks: [app]
+
+volumes:
+  mysql_data:
+  redis_data:
+  n8n_data:
+  frontend_dist:
+
+networks:
+  app:
+    driver: bridge

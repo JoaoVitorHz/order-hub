@@ -1,0 +1,178 @@
+{
+  "name": "Workflow 2 - Alerta de Pedido Cancelado",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-cancelled",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Pedido Cancelado",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "order-cancelled"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "check-cancelled",
+              "leftValue": "={{ $json.body.new_status }}",
+              "rightValue": "cancelled",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-cancelled",
+      "name": "Filtrar apenas 'cancelled'",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "=http://backend:8000/api/affiliates/{{ $json.body.affiliate_id }}/summary",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Accept", "value": "application/json" }]
+        },
+        "options": {}
+      },
+      "id": "fetch-affiliate-summary",
+      "name": "Buscar Resumo do Afiliado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "check-cancellation-rate",
+              "leftValue": "={{ $json.data.summary.cancellation_rate }}",
+              "rightValue": 30,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-high-cancellation",
+      "name": "Taxa de cancelamento > 30%?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://webhook.site/REPLACE_WITH_YOUR_ALERT_WEBHOOK_ID",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "alert", "value": "⚠️ ATENÇÃO: Afiliado em risco de cancelamento elevado" },
+            { "name": "affiliate_id", "value": "={{ $('Webhook - Pedido Cancelado').item.json.body.affiliate_id }}" },
+            { "name": "cancellation_rate", "value": "={{ $json.data.summary.cancellation_rate }}%" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-alert",
+      "name": "Alerta de Alta Taxa de Cancelamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 120]
+    },
+    {
+      "parameters": {
+        "url": "https://webhook.site/REPLACE_WITH_YOUR_LOG_WEBHOOK_ID",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "order_id",          "value": "={{ $('Webhook - Pedido Cancelado').item.json.body.order_id }}" },
+            { "name": "affiliate_id",      "value": "={{ $('Webhook - Pedido Cancelado').item.json.body.affiliate_id }}" },
+            { "name": "total_value",       "value": "={{ $('Webhook - Pedido Cancelado').item.json.body.total_value }}" },
+            { "name": "cancelled_at",      "value": "={{ $('Webhook - Pedido Cancelado').item.json.body.occurred_at }}" },
+            { "name": "cancellation_rate", "value": "={{ $('Buscar Resumo do Afiliado').item.json.data.summary.cancellation_rate }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-cancellation",
+      "name": "Registrar Cancelamento (Google Sheets / webhook.site)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"ok\" }",
+        "options": {}
+      },
+      "id": "response-ok",
+      "name": "Resposta OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"skipped\", \"reason\": \"not cancelled\" }",
+        "options": {}
+      },
+      "id": "response-skip",
+      "name": "Resposta Skip",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 420]
+    }
+  ],
+  "connections": {
+    "Webhook - Pedido Cancelado": {
+      "main": [[{ "node": "Filtrar apenas 'cancelled'", "type": "main", "index": 0 }]]
+    },
+    "Filtrar apenas 'cancelled'": {
+      "main": [
+        [{ "node": "Buscar Resumo do Afiliado", "type": "main", "index": 0 }],
+        [{ "node": "Resposta Skip", "type": "main", "index": 0 }]
+      ]
+    },
+    "Buscar Resumo do Afiliado": {
+      "main": [[{ "node": "Taxa de cancelamento > 30%?", "type": "main", "index": 0 }]]
+    },
+    "Taxa de cancelamento > 30%?": {
+      "main": [
+        [{ "node": "Alerta de Alta Taxa de Cancelamento", "type": "main", "index": 0 }],
+        [{ "node": "Registrar Cancelamento (Google Sheets / webhook.site)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Alerta de Alta Taxa de Cancelamento": {
+      "main": [[{ "node": "Registrar Cancelamento (Google Sheets / webhook.site)", "type": "main", "index": 0 }]]
+    },
+    "Registrar Cancelamento (Google Sheets / webhook.site)": {
+      "main": [[{ "node": "Resposta OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1",
+  "meta": { "templateCredsSetupCompleted": true }
+}
