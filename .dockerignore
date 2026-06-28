@@ -1,0 +1,19 @@
+# Never send these to the Docker build context
+backend/vendor/
+backend/.env
+backend/storage/logs/
+backend/.phpunit.result.cache
+backend/database/database.sqlite
+
+frontend/node_modules/
+frontend/dist/
+
+# Docker volumes (local only)
+mysql_data/
+redis_data/
+n8n_data/
+
+# IDE / OS
+.claude/
+.git/
+*.pdf
